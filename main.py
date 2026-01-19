@@ -35,7 +35,7 @@ def load_config():
 # Function to update the 'page' query parameter in a URL
 def update_url_page_number(url, page_number):
     parsed_url = urlparse(url)
-    query_params = parse_qs(parsed_url.query)
+    query_params = parse_qs(parsed_url.query, keep_blank_values=True)
     query_params['page'] = [str(page_number)]
     new_query_string = urlencode(query_params, doseq=True)
     return urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.params, new_query_string,
@@ -236,6 +236,8 @@ def scrape_works(start_page, end_page, last_visited_page, delay, url, full_csv_p
                         exit(0)
 
             works_on_page = soup.select("li.work")
+            print('works_on_page length:', len(works_on_page))
+            print('works_on_page sample:', [work.get('id') for work in works_on_page])
 
             # Apply sampling here
             sampled_works = apply_sampling(sampling_strategy, sampling_percentage, works_on_page, sampling_n,
@@ -349,6 +351,7 @@ def main():
 
         try:
             url = config.get('url')
+            print('url:', url)
             if url is None:
                 raise KeyError('url')
 
