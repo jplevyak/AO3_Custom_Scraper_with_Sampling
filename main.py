@@ -32,6 +32,59 @@ def load_config():
         return None
 
 
+# Creates a session and returns the authenticity token and session
+def create_session(user_agent):
+    print("Creating a session...")
+    headers = {'User-Agent': user_agent}
+    try:
+        session = requests.Session()
+        session.headers.update(headers)
+        response = session.get("https://archiveofourown.org/users/login")
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        token = soup.find('input', {'name': 'authenticity_token'})
+
+        if token is None:
+            print("Error: Authenticity token not found.")
+            return None, None
+        else:
+            token = token['value']
+            print("Session created.")
+            return token, session
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error creating session: {e}")
+        return None, None
+
+
+# Logs in to AO3
+def perform_login(session, token, username, password):
+    print(f"Attempting to log in as {username}...")
+    payload = {
+        "utf8": "✓",
+        "authenticity_token": token,
+        "user[login]": username,
+        "user[password]": password,
+        "commit": "Log in"
+    }
+
+    try:
+        response = session.post("https://archiveofourown.org/users/login", data=payload)
+        response.raise_for_status()
+
+        if "Successfully logged in" in response.text:
+            print("Login successful.")
+            return True
+        else:
+            print("Login failed. Please check your credentials.")
+            return False
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error logging in: {e}")
+        return False
+
+
 # Function to update the 'page' query parameter in a URL
 def update_url_page_number(url, page_number):
     parsed_url = urlparse(url)
@@ -52,7 +105,7 @@ def get_element_text_list(elements):
     return [element.text.strip() for element in elements] if elements else []
 
 
-def scrape_single_work(work, csvwriter, internal_delimiter, delay, user_agent, page, kudos_bins):
+def scrape_single_work(work, csvwriter, internal_delimiter, delay, user_agent, page, kudos_bins, session=None):
     # First, check if there's a title
     title_element = work.select_one("h4 a")
     if title_element:
@@ -113,7 +166,10 @@ def scrape_single_work(work, csvwriter, internal_delimiter, delay, user_agent, p
     # Get the publication date of the work (has to be taken from the work page)
     try:
         headers = {'User-Agent': user_agent}
-        response = requests.get(work_url, headers=headers)
+        if session:
+            response = session.get(work_url, headers=headers)
+        else:
+            response = requests.get(work_url, headers=headers)
         time.sleep(delay)
 
         if not handle_rate_limit(response, page):
@@ -171,7 +227,7 @@ def scrape_single_work(work, csvwriter, internal_delimiter, delay, user_agent, p
 
 # Scrape the bookmarks of a user
 def scrape_works(start_page, end_page, last_visited_page, delay, url, full_csv_path, internal_delimiter, max_work_count,
-                 sampling_strategy, sampling_percentage, sampling_n, kudos_bins, file_mode, user_agent):
+                 sampling_strategy, sampling_percentage, sampling_n, kudos_bins, file_mode, user_agent, session=None):
     global strata_counts
     strata_counts = {k: 0 for k in kudos_bins[:-1]}
 
@@ -215,7 +271,10 @@ def scrape_works(start_page, end_page, last_visited_page, delay, url, full_csv_p
             while retry_count < max_retries:
                 try:
                     headers = {'User-Agent': user_agent}
-                    response = requests.get(updated_url, headers=headers)
+                    if session:
+                        response = session.get(updated_url, headers=headers)
+                    else:
+                        response = requests.get(updated_url, headers=headers)
                     time.sleep(delay)
 
                     if not handle_rate_limit(response, page):  # catch 4xx/5xx here
@@ -252,7 +311,7 @@ def scrape_works(start_page, end_page, last_visited_page, delay, url, full_csv_p
                         continue
 
                     # Scrape the single work here
-                    scrape_single_work(work, csvwriter, internal_delimiter, delay, user_agent, page, kudos_bins)
+                    scrape_single_work(work, csvwriter, internal_delimiter, delay, user_agent, page, kudos_bins, session)
                     work_count += 1  # Increase the work_count (for max_work_count)
                     pbar.update(1)
 
@@ -379,6 +438,16 @@ def main():
             csv_path = config.get('csv_path') or './'
             full_csv_path = f"{csv_path}{csv_file}.csv"
             user_agent = config.get('user_agent') or "AO3 Sample Scraper Bot"
+            username = config.get('username')
+            password = config.get('password')
+
+            session = None
+            if username and password:
+                token, session = create_session(user_agent)
+                if session and token:
+                    if not perform_login(session, token, username, password):
+                        print("Continuing without logging in...")
+                        session = None # Reset session if login fails
 
             # Sampling (default: no sampling. Options: random, systematic, strata)
             sampling_strategy = config.get("sampling_strategy", None)
@@ -413,7 +482,7 @@ def main():
         # Scrape the works
         scrape_works(start_page, end_page, last_visited_page, delay, url, full_csv_path, internal_delimiter,
                      max_work_count, sampling_strategy, sampling_percentage, sampling_n, kudos_bins, file_mode,
-                     user_agent)
+                     user_agent, session)
 
         # If everything went well, delete the last_visited_page.txt, seen_work_ids.txt and strata_counts.json files
         if os.path.exists("last_visited_page.txt"):
