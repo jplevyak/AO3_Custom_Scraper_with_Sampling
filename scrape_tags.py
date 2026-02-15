@@ -69,6 +69,13 @@ def scrape_tag_page(session, tag, delay, user_agent):
                 time.sleep(delay * 2) # Backoff a bit
                 continue
 
+            # 525 SSL Handshake Failed
+            if response.status_code == 522:
+                print(f"525 SSL Handshake Failed for {tag}. Retrying ({retry_count + 1}/{max_retries})...")
+                retry_count += 1
+                time.sleep(delay * 2) # Backoff a bit
+                continue
+
             time.sleep(delay)
             
             if response.status_code != 200:
