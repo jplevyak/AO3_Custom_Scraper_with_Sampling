@@ -70,7 +70,7 @@ def scrape_tag_page(session, tag, delay, user_agent):
                 continue
 
             # 525 SSL Handshake Failed
-            if response.status_code == 522:
+            if response.status_code == 525:
                 print(f"525 SSL Handshake Failed for {tag}. Retrying ({retry_count + 1}/{max_retries})...")
                 retry_count += 1
                 time.sleep(delay * 2) # Backoff a bit
@@ -80,9 +80,7 @@ def scrape_tag_page(session, tag, delay, user_agent):
             
             if response.status_code != 200:
                 print(f"Failed to fetch {url}. Status code: {response.status_code}")
-                # For 404s or other 4xx/5xx that are not retriable/specific, we might just fail?
-                # But let's stick to the current logic: return None
-                return None
+                return None, response.status_code
 
             soup = BeautifulSoup(response.content, 'html.parser')
         
@@ -125,7 +123,7 @@ def scrape_tag_page(session, tag, delay, user_agent):
                 'Parent Tags': '; '.join(parent_tags),
                 'Synonym Tags': '; '.join(synonym_tags),
                 'Sub Tags': '; '.join(sub_tags)
-            }
+            }, 200
 
         except requests.exceptions.Timeout:
             print(f"Request timed out for {tag}. Retrying ({retry_count + 1}/{max_retries})...")
@@ -137,10 +135,10 @@ def scrape_tag_page(session, tag, delay, user_agent):
             time.sleep(delay)
         except Exception as e:
             print(f"Error scraping {tag}: {e}")
-            return None
+            return None, 0
             
     print(f"Failed to scrape {tag} after {max_retries} retries.")
-    return None
+    return None, 0
 
 def main():
     print("Initializing Tag Scraper...")
@@ -191,13 +189,17 @@ def main():
         print(f"Skipping {len(seen_tags)} already scraped tags. {len(tags_to_process)} remaining.")
 
         for tag in tqdm(tags_to_process, desc="Scraping Tags"):
-            data = scrape_tag_page(session, tag, delay, user_agent)
+            data, status_code = scrape_tag_page(session, tag, delay, user_agent)
             if data:
                 writer.writerow(data)
                 csvfile.flush() # Ensure data is written
             else:
-                with open('scrape_tags_failed.txt', 'a', encoding='utf-8') as f_failed:
-                    f_failed.write(tag + '\n')
+                if status_code == 404:
+                    with open('scrape_tags_404.txt', 'a', encoding='utf-8') as f_404:
+                        f_404.write(tag + '\n')
+                else:
+                    with open('scrape_tags_failed.txt', 'a', encoding='utf-8') as f_failed:
+                        f_failed.write(tag + '\n')
             
     print("Done.")
 
